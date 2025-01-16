@@ -9,8 +9,10 @@ import (
 	"wallet-system/models"
 
 	"github.com/gorilla/mux"
+	"github.com/xuri/excelize/v2"
 )
 
+// CreateUser:- creates a new user in the database
 func CreateUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse the JSON body
@@ -47,7 +49,7 @@ func CreateUser(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// UpdateUser updates a user's details (e.g., username)
+// UpdateUser:- updates a user's details (e.g., username)
 func UpdateUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get user ID from URL
@@ -78,7 +80,7 @@ func UpdateUser(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// DeleteUser deletes a user from the database
+// DeleteUser:- deletes a user from the database
 func DeleteUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract the `id` from the path parameters
@@ -100,6 +102,7 @@ func DeleteUser(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// If the user does not exist, return a 404 Not Found
 		if !exists {
 			http.Error(w, "No user found with the provided id", http.StatusNotFound)
 			return
@@ -114,12 +117,13 @@ func DeleteUser(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Send a success response
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "User deleted successfully")
 	}
 }
 
-// CreditBalance credits an amount to a user's wallet
+// CreditBalance:- credits an amount to a user's wallet
 func CreditBalance(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse the JSON body
@@ -169,7 +173,7 @@ func CreditBalance(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// DebitBalance debits an amount from a user's wallet
+// DebitBalance:- debits an amount from a user's wallet
 func DebitBalance(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse the JSON body
@@ -184,8 +188,12 @@ func DebitBalance(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Validate input
-		if requestData.ID == "" || requestData.Amount <= 0 {
-			http.Error(w, "id and valid amount are required", http.StatusBadRequest)
+		if requestData.ID == "" {
+			http.Error(w, "Invalid id", http.StatusBadRequest)
+			return
+		}
+		if requestData.Amount <= 0 {
+			http.Error(w, "Invalid amount", http.StatusBadRequest)
 			return
 		}
 
@@ -201,7 +209,7 @@ func DebitBalance(db *sql.DB) http.HandlerFunc {
 		err = tx.QueryRow(`SELECT balance FROM users WHERE id = $1`, requestData.ID).Scan(&balance)
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, "User not found", http.StatusNotFound)
+			http.Error(w, fmt.Sprintf("User not found with id %s", requestData.ID), http.StatusNotFound)
 			return
 		}
 		if balance < requestData.Amount {
@@ -322,7 +330,7 @@ func GetUserDetails(db *sql.DB) http.HandlerFunc {
 			&userDetails.ID, &userDetails.Username, &userDetails.Balance)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				http.Error(w, "User not found", http.StatusNotFound)
+				http.Error(w, fmt.Sprintf("User not found with id %s", id), http.StatusNotFound)
 				return
 			}
 			http.Error(w, "Failed to fetch user details", http.StatusInternalServerError)
@@ -448,4 +456,94 @@ func GetTransactionSummary(db *sql.DB) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(summary)
 	}
+}
+
+// ExportUserTransactionsExcel:- generates an Excel file with user transactions
+func ExportUserTransactionsExcel(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract user ID from the request
+		vars := mux.Vars(r)
+		userId := vars["id"]
+
+		// Fetch user and transactions from the database
+		user, err := getUserWithTransactions(db, userId)
+		if err != nil {
+			http.Error(w, "Failed to fetch user transactions", http.StatusInternalServerError)
+			return
+		}
+
+		// Create a new Excel file
+		f := excelize.NewFile()
+		sheetName := "Transactions"
+
+		// Create sheet and set headers
+		f.SetSheetName("Sheet1", sheetName)
+		headers := []string{"Transaction ID", "Date", "Type", "Credit", "Debit", "Balance"}
+		for i, header := range headers {
+			cell := fmt.Sprintf("%s%d", string('A'+i), 1)
+			f.SetCellValue(sheetName, cell, header)
+		}
+
+		// Populate rows with transaction data
+		currentBalance := user.Balance
+		for i, t := range user.Transactions {
+			row := i + 2
+			f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), t.ID)
+			f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), t.CreatedAt.Format("2006-01-02"))
+			f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), t.Type)
+
+			// Separate credit and debit
+			if t.Type == "credit" {
+				f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), t.Amount)
+				f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), "")
+				currentBalance += t.Amount
+			} else if t.Type == "debit" {
+				f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), "")
+				f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), t.Amount)
+				currentBalance -= t.Amount
+			}
+
+			// Add updated balance
+			f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), currentBalance)
+		}
+
+		// Save the file to a temporary location
+		filename := fmt.Sprintf("user_%s_transactions.xlsx", userId)
+		err = f.SaveAs(filename)
+		if err != nil {
+			http.Error(w, "Failed to generate Excel file", http.StatusInternalServerError)
+			return
+		}
+
+		// Serve the file as a download
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+		w.Header().Set("Content-Transfer-Encoding", "binary")
+		http.ServeFile(w, r, filename)
+	}
+}
+
+// Helper function to fetch user details and transactions
+func getUserWithTransactions(db *sql.DB, userId string) (models.User, error) {
+	var user models.User
+	rows, err := db.Query(`
+		SELECT u.id, u.username, t.id, t.type, t.amount, t.created_at 
+		FROM transactions t
+		JOIN users u ON t.user_id = u.id
+		WHERE t.user_id = $1`, userId)
+	if err != nil {
+		return user, err
+	}
+	defer rows.Close()
+
+	user.Transactions = []models.Transaction{}
+	for rows.Next() {
+		var t models.Transaction
+		err := rows.Scan(&user.ID, &user.Username, &t.ID, &t.Type, &t.Amount, &t.CreatedAt)
+		if err != nil {
+			return user, err
+		}
+		user.Transactions = append(user.Transactions, t)
+	}
+	return user, nil
 }

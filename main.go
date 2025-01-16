@@ -29,6 +29,7 @@ func main() {
 	r.HandleFunc("/user/debit", handlers.DebitBalance(db)).Methods("POST")                            // Debit balance for user by ID
 	r.HandleFunc("/user/transactions/{id}", handlers.GetTransactions(db)).Methods("GET")              // Get all transactions for user by ID
 	r.HandleFunc("/user/transaction-summary/{id}", handlers.GetTransactionSummary(db)).Methods("GET") // Get transaction summary for user by ID
+	r.HandleFunc("/export/excel/{id}", handlers.ExportUserTransactionsExcel(db)).Methods("GET")   //Get user transactions in excel format
 
 	// Health check endpoint
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
