@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 	"wallet-system/models"
 
@@ -29,7 +31,37 @@ func CreateUser(db *sql.DB) http.HandlerFunc {
 
 		// Validate input
 		if requestData.Username == "" {
-			http.Error(w, "username is required", http.StatusBadRequest)
+			http.Error(w, "Username is required", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username has spaces at the beginning or end
+		if strings.TrimSpace(requestData.Username) != requestData.Username {
+			http.Error(w, "Username cannot have leading or trailing spaces", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username contains any numbers
+		if regexp.MustCompile(`[0-9]`).MatchString(requestData.Username) {
+			http.Error(w, "Username cannot contain numbers", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username contains any special characters or symbols
+		if regexp.MustCompile(`[^a-zA-Z\s]`).MatchString(requestData.Username) {
+			http.Error(w, "Username can only contain alphabetic characters and spaces", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username has multiple consecutive spaces
+		if strings.Contains(requestData.Username, "  ") {
+			http.Error(w, "Username cannot have consecutive spaces", http.StatusBadRequest)
+			return
+		}
+
+		// Check for minimum and maximum length (optional, adjust limits as needed)
+		if len(requestData.Username) < 3 || len(requestData.Username) > 50 {
+			http.Error(w, "Username must be between 3 and 50 characters long", http.StatusBadRequest)
 			return
 		}
 
@@ -66,6 +98,41 @@ func UpdateUser(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Validate input
+		if user.Username == "" {
+			http.Error(w, "Username is required", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username has spaces at the beginning or end
+		if strings.TrimSpace(user.Username) != user.Username {
+			http.Error(w, "Username cannot have leading or trailing spaces", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username contains any numbers
+		if regexp.MustCompile(`[0-9]`).MatchString(user.Username) {
+			http.Error(w, "Username cannot contain numbers", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username contains any special characters or symbols
+		if regexp.MustCompile(`[^a-zA-Z\s]`).MatchString(user.Username) {
+			http.Error(w, "Username can only contain alphabetic characters and spaces", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the username has multiple consecutive spaces
+		if strings.Contains(user.Username, "  ") {
+			http.Error(w, "Username cannot have consecutive spaces", http.StatusBadRequest)
+			return
+		}
+
+		// Check for minimum and maximum length (optional, adjust limits as needed)
+		if len(user.Username) < 3 || len(user.Username) > 50 {
+			http.Error(w, "Username must be between 3 and 50 characters long", http.StatusBadRequest)
+			return
+		}
 		// Update the user in the database
 		query := `UPDATE users SET username = $1 WHERE id = $2`
 		_, err := db.Exec(query, user.Username, id)
@@ -258,7 +325,7 @@ func GetTransactions(db *sql.DB) http.HandlerFunc {
 			FROM transactions t
 			JOIN users u ON t.user_id = u.id
 			WHERE t.user_id = $1
-			ORDER BY t.created_at DESC`, id)
+			ORDER BY t.created_at DESC`, id) // It will show the recent transaction at 1st position
 		if err != nil {
 			http.Error(w, "Failed to fetch transactions", http.StatusInternalServerError)
 			return
@@ -484,7 +551,7 @@ func ExportUserTransactionsExcel(db *sql.DB) http.HandlerFunc {
 			f.SetCellValue(sheetName, cell, header)
 		}
 
-		// Populate rows with transaction data
+		// Populate the sheet with transaction data
 		currentBalance := user.Balance
 		for i, t := range user.Transactions {
 			row := i + 2
@@ -515,10 +582,15 @@ func ExportUserTransactionsExcel(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Send success message in the response body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		response := fmt.Sprintf(`{"message": "Excel file generated for user ID: %s", "filename": "%s"}`, userId, filename)
+		w.Write([]byte(response))
+
 		// Serve the file as a download
 		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
-		w.Header().Set("Content-Transfer-Encoding", "binary")
 		http.ServeFile(w, r, filename)
 	}
 }

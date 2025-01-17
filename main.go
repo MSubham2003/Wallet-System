@@ -37,7 +37,7 @@ func main() {
 		fmt.Fprintf(w, "Health check passed")
 	}).Methods("GET")
 
-	// Test endpoint (for example use)
+	// Test endpoint
 	r.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Hello, Wallet System!")
 	}).Methods("GET")

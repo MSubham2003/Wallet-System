@@ -20,11 +20,11 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 		// Format log entry
 		logEntry := fmt.Sprintf(
-			"%s %-20s %-15s %s %-10s %s",
+			"\t\tStatus: %s %-20s URI:-%-15s\t %-10s\t %s",
 			colorizeStatusCode(rec.statusCode), // Color-coded status
 			r.Method,
 			r.RequestURI,
-			r.RemoteAddr,
+			// r.RemoteAddr,
 			time.Since(start),
 			resetColor(),
 		)
