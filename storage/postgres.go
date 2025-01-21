@@ -10,7 +10,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func Connect() *sql.DB {
+func Connect() *sql.DB {	
 	// Load .env file
 	err := godotenv.Load(".env")
 	if err != nil {
