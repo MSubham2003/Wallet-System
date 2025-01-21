@@ -2,15 +2,13 @@ package middleware
 
 import (
 	"fmt"
-	"log"
 	"net/http"
-	"time"
 )
 
 // LoggingMiddleware logs HTTP requests with status codes, execution time, and color-coded status
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+		// start := time.Now()
 
 		// Use a ResponseWriter wrapper to capture the status code
 		rec := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
@@ -19,18 +17,18 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		// Format log entry
-		logEntry := fmt.Sprintf(
-			"\t\tStatus: %s %-20s URI:-%-15s\t %-10s\t %s",
-			colorizeStatusCode(rec.statusCode), // Color-coded status
-			r.Method,
-			r.RequestURI,
-			// r.RemoteAddr,
-			time.Since(start),
-			resetColor(),
-		)
+		// logEntry := fmt.Sprintf(
+		// 	"\t\tStatus: %s %-20s URI:-%-15s\t %-10s\t %s",
+		// 	colorizeStatusCode(rec.statusCode), // Color-coded status
+		// 	r.Method,
+		// 	r.RequestURI,
+		// 	// r.RemoteAddr,
+		// 	time.Since(start),
+		// 	resetColor(),
+		// )
 
-		// Log the request details
-		log.Println(logEntry)
+		// // Log the request details
+		// log.Println(logEntry)
 	})
 }
 
