@@ -12,7 +12,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// Perform Dbeit and Credit Transaction
+// Perform Debit and Credit Transaction locking using transactions
 func TransactionStart(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Read the user ID and username from the body of the request
@@ -33,57 +33,26 @@ func TransactionStart(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Poll the wallet's lock status
-		maxWaitTime := 10 * time.Second // Maximum wait time
-		checkInterval := 1 * time.Second
-		startTime := time.Now()
-
-		for {
-			var lockStatus bool
-			err := db.QueryRow("SELECT locked FROM shared_wallet").Scan(&lockStatus)
-			if err != nil {
-				http.Error(w, "Error checking wallet lock status", http.StatusInternalServerError)
-				return
-			}
-			if !lockStatus {
-				break
-			}
-			fmt.Println("Wait...")
-			if time.Since(startTime) > maxWaitTime {
-				http.Error(w, "Transaction timeout. Please try again later.", http.StatusGatewayTimeout)
-				return
-			}
-			time.Sleep(checkInterval)
-		}
-
 		// Start a database transaction
 		tx, err := db.Begin()
 		if err != nil {
 			http.Error(w, "Failed to begin transaction", http.StatusInternalServerError)
 			return
 		}
-		defer tx.Rollback()
 
-		// Lock the wallet
-		_, err = tx.Exec("UPDATE shared_wallet SET locked = TRUE WHERE locked = FALSE")
+		// Lock the shared wallet row using SELECT ... FOR UPDATE
+		var balance float64
+		err = tx.QueryRow("SELECT balance FROM shared_wallet WHERE id = 1 FOR UPDATE").Scan(&balance)
 		if err != nil {
-			http.Error(w, "Error locking wallet", http.StatusInternalServerError)
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			http.Error(w, "Error committing lock update", http.StatusInternalServerError)
+			tx.Rollback() // Rollback transaction on error
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Reopen transaction for operation
-		tx, err = db.Begin()
-		if err != nil {
-			http.Error(w, "Failed to begin transaction", http.StatusInternalServerError)
-			return
-		}
-		defer tx.Rollback()
 
-		// Ask for transaction details
+
+		// Ask for transaction details in termial
+		fmt.Println("\n\nHi", user.Username)
 		fmt.Println("Enter operation: 'debit' or 'credit'")
 		var operation string
 		fmt.Scanln(&operation)
@@ -91,6 +60,7 @@ func TransactionStart(db *sql.DB) http.HandlerFunc {
 		operation = strings.ToLower(operation)
 		if operation != "debit" && operation != "credit" {
 			http.Error(w, "Invalid operation", http.StatusBadRequest)
+			fmt.Println("Invalid operation")
 			return
 		}
 
@@ -102,45 +72,36 @@ func TransactionStart(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		var balance float64
-		err = tx.QueryRow("SELECT balance FROM shared_wallet").Scan(&balance)
-		if err != nil {
-			http.Error(w, "Error fetching balance", http.StatusInternalServerError)
-			return
-		}
 
+
+		// Perform the transaction logic: Debit or Credit
 		if operation == "debit" {
 			if amount > balance {
-				http.Error(w, "Insufficient balance\nWallet is now LOCKED", http.StatusBadRequest)
-				fmt.Println("Insufficient balance\nWallet is now LOCKED")
+				http.Error(w, "Insufficient balance", http.StatusBadRequest)
+				fmt.Println("Insufficient balance")
 				return
 			}
+			// Debit operation
+			_, err = tx.Exec("UPDATE shared_wallet SET balance = balance - $1 WHERE id = 1", amount)
+		} else {
+			// Credit operation
+			_, err = tx.Exec("UPDATE shared_wallet SET balance = balance + $1 WHERE id = 1", amount)
 		}
-
-		updateQuery := "UPDATE shared_wallet SET balance = balance + $1 WHERE locked = TRUE"
-		if operation == "debit" {
-			updateQuery = "UPDATE shared_wallet SET balance = balance - $1 WHERE locked = TRUE"
-		}
-
-		_, err = tx.Exec(updateQuery, amount)
 		if err != nil {
+			tx.Rollback() // Rollback the transaction if error occurs
 			http.Error(w, "Error performing the transaction", http.StatusInternalServerError)
 			return
 		}
 
-		// Unlock the wallet
-		_, err = tx.Exec("UPDATE shared_wallet SET locked = FALSE WHERE locked = TRUE")
-		if err != nil {
-			http.Error(w, "Error unlocking wallet", http.StatusInternalServerError)
-			return
-		}
 
-		// Log the transaction
+
+		// Log the transaction (Insert into the transactions table)
 		_, err = tx.Exec(
 			"INSERT INTO transactions (user_id, user_name, type, amount) VALUES ($1, $2, $3, $4)",
 			user.ID, user.Username, operation, amount,
 		)
 		if err != nil {
+			tx.Rollback() // Rollback transaction on error
 			http.Error(w, "Error logging transaction", http.StatusInternalServerError)
 			return
 		}
@@ -151,6 +112,7 @@ func TransactionStart(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Return success response
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "Transaction completed successfully\nOperation: %s\nAmount: %f\n", operation, amount)
 		fmt.Printf("Transaction completed successfully\nOperation: %s\nAmount: %f\n", operation, amount)
@@ -286,30 +248,31 @@ func GetTransactionSummary(db *sql.DB) http.HandlerFunc {
 // GetWalletDetails:- Get The wallet details ie. Wallet Balance and Wallet Lock Status
 func GetWalletDetails(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Query to get the wallet details (balance and lock status)
+		// Variables to hold wallet details
 		var balance float64
-		var locked bool
+		var createdAt time.Time
 
-		err := db.QueryRow("SELECT balance, locked FROM shared_wallet LIMIT 1").Scan(&balance, &locked)
+		// Query to fetch wallet details
+		err := db.QueryRow("SELECT balance, created_at FROM shared_wallet WHERE id = 1").Scan(&balance, &createdAt)
 		if err != nil {
 			log.Printf("Error fetching wallet details: %v", err)
 			http.Error(w, "Error fetching wallet details", http.StatusInternalServerError)
 			return
 		}
 
-		// Create a struct to hold the wallet details
+		// Struct to hold the response data
 		walletDetails := struct {
-			Balance float64 `json:"balance"`
-			Locked  bool    `json:"locked"`
+			Balance   float64   `json:"balance"`
+			CreatedAt time.Time `json:"created_at"`
 		}{
-			Balance: balance,
-			Locked:  locked,
+			Balance:   balance,
+			CreatedAt: createdAt,
 		}
 
-		// Set the response content type to JSON
+		// Set response content type
 		w.Header().Set("Content-Type", "application/json")
 
-		// Encode the wallet details struct to JSON and send it as the response
+		// Encode the wallet details into JSON and return
 		if err := json.NewEncoder(w).Encode(walletDetails); err != nil {
 			log.Printf("Error encoding wallet details: %v", err)
 			http.Error(w, "Error generating response", http.StatusInternalServerError)

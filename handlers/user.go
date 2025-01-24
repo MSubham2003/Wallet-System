@@ -27,8 +27,8 @@ func validateName(name string, fieldName string) error {
 	if regexp.MustCompile(`[^a-zA-Z\s]`).MatchString(name) {
 		return fmt.Errorf("%s can only contain alphabetic characters and spaces", fieldName)
 	}
-	if strings.Contains(name, "  ") {
-		return fmt.Errorf("%s cannot have consecutive spaces", fieldName)
+	if strings.Contains(name, " ") {
+		return fmt.Errorf("%s cannot have spaces", fieldName)
 	}
 	if len(name) < 3 || len(name) > 50 {
 		return fmt.Errorf("%s must be between 3 and 50 characters long", fieldName)
@@ -97,6 +97,21 @@ func UpdateUser(db *sql.DB) http.HandlerFunc {
 		id := mux.Vars(r)["id"]
 		if id == "" {
 			http.Error(w, "ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the user exists
+		var exists bool
+		err1 := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", id).Scan(&exists)
+		if err1 != nil {
+			log.Printf("Error checking user existence: %v", err1)
+			http.Error(w, "Error checking user existence", http.StatusInternalServerError)
+			return
+		}
+
+		// If the user doesn't exist, return a "user not found" message
+		if !exists {
+			http.Error(w, fmt.Sprintf("User not found with ID %s", id), http.StatusNotFound)
 			return
 		}
 

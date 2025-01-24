@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	// Import package
 	"wallet-system/handlers"
-	"wallet-system/middleware" // Import the middleware package
+	"wallet-system/middleware" 
 	database "wallet-system/storage"
 
 	"github.com/gorilla/mux"
